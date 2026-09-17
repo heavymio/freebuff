@@ -33,6 +33,32 @@ async function getMachineId(): Promise<string> {
   return id
 }
 
+/**
+ * systeminformation's cpu() evaluates os.cpus() inside a process.nextTick
+ * callback, where a throw becomes an uncaught exception that no try/catch
+ * can intercept (e.g. Bun's os.cpus() throws "Failed to get CPU
+ * information" on ARM Linux when /proc sources disagree during CPU
+ * hotplug). Probe os.cpus() first: if it throws, skip si.cpu() and
+ * return empty values. See #1374.
+ */
+async function getCpuInfoSafe(): Promise<{ manufacturer: string; brand: string; cores: number; physicalCores: number }> {
+  cpus()
+  try {
+    if (!systeminformationModule) {
+      systeminformationModule = await import('systeminformation')
+    }
+    const info = await systeminformationModule.cpu()
+    return {
+      manufacturer: info.manufacturer,
+      brand: info.brand,
+      cores: info.cores,
+      physicalCores: info.physicalCores,
+    }
+  } catch {
+    return { manufacturer: '', brand: '', cores: 0, physicalCores: 0 }
+  }
+}
+
 async function getSystemInfo(): Promise<{
   system: { manufacturer: string; model: string; serial: string; uuid: string }
   cpu: { manufacturer: string; brand: string; cores: number; physicalCores: number }
@@ -44,7 +70,7 @@ async function getSystemInfo(): Promise<{
     }
     const [systemInfo, cpuInfo, osInfo] = await Promise.all([
       systeminformationModule.system(),
-      systeminformationModule.cpu(),
+      getCpuInfoSafe(),
       systeminformationModule.osInfo(),
     ])
     return {
